@@ -103,6 +103,7 @@ const FreelancerProfileEdit = () => {
       try {
         // parallel fetch professions and profile
         const token = await getAuthToken();
+        console.log("🔥 Clerk Token:", token);
 
         const [profRes, profileRes] = await Promise.all([
           fetch(`${API_BASE}/professions/`),
@@ -202,12 +203,17 @@ const FreelancerProfileEdit = () => {
     const name = `${firstName}`.trim() + (lastName ? ` ${lastName.trim()}` : "");
 
     // Build payload aligned with your model
-    const payload: any = {
-      name,
+   const payload: any = {
+  // nested user info
+      user_first_name: firstName.trim(),
+      user_last_name: lastName.trim(),
+      user_email: email.trim(),
+
+      // freelancer profile fields
+      name: `${firstName.trim()} ${lastName.trim()}`,
       title,
       tagline,
       bio,
-      email,
       phone,
       county,
       county_code: countyCode,
@@ -217,7 +223,7 @@ const FreelancerProfileEdit = () => {
       years_experience: yearsExperience === "" ? 0 : Number(yearsExperience),
       skills,
       availability,
-      profession: selectedProfessionId, // maps to profession FK
+      profession: selectedProfessionId,
     };
 
     try {

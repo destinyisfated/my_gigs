@@ -36,9 +36,18 @@ class JobAdmin(admin.ModelAdmin):
    
 admin.site.register(Job, JobAdmin)  
 
+# class TestimonialAdmin(admin.ModelAdmin):
+#     list_display = ('name', 'content', 'rating', 'created_at')
+#     search_fields = ('name', 'freelancer__name', 'content')
+#     list_filter = ('rating', 'created_at')
+#     ordering = ('-created_at',)
+# admin.site.register(Testimonial, TestimonialAdmin)
+
 class TestimonialAdmin(admin.ModelAdmin):
-    list_display = ('name', 'content', 'rating', 'created_at')
-    search_fields = ('name', 'freelancer__name', 'content')
-    list_filter = ('rating', 'created_at')
-    ordering = ('-created_at',)
+    list_display = ("name", "rating", "is_approved", "created_at")
+    list_filter = ("is_approved", "rating")
+    actions = ["approve_testimonials"]
+
+    def approve_testimonials(self, request, queryset):
+        queryset.update(is_approved=True)
 admin.site.register(Testimonial, TestimonialAdmin)

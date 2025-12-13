@@ -1,11 +1,14 @@
 from django.shortcuts import get_object_or_404, render
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from .serializers import FreelancerListSerializer, JobSerializer, ProfessionSerializer, ReviewSerializer, ReviewReplySerializer, TestimonialSerializer, FreelancerDetailSerializer, FreelancerSerializer
 from rest_framework import filters
 from rest_framework.response import Response
 from rest_framework.views import APIView   
-from .models import Freelancer, Job, Review, Testimonial, Profession
-from rest_framework.decorators import action   
+from .models import Freelancer, Job, Review, Testimonial, Profession, ReviewHelpful
+from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser  
+from users.authentication import ClerkAuthentication  
+from users.utils import get_or_create_freelancer
 
 # Create your views here.
 #
@@ -98,70 +101,60 @@ class FreelancerViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = FreelancerListSerializer(featured, many=True)
         return Response(serializer.data)
 
+
 class FreelancerProfileUpdateView(APIView):
-    # authentication_classes = [ClerkAuthentication]
-    # permission_classes = [IsAuthenticated]
+    authentication_classes = [ClerkAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         freelancer = get_or_create_freelancer(request.user)
         serializer = FreelancerSerializer(freelancer)
-        return Response(serializer.data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     def put(self, request):
         freelancer = get_or_create_freelancer(request.user)
-        serializer = FreelancerSerializer(
-            freelancer, 
-            data=request.data, 
-            partial=True
-        )
+        serializer = FreelancerSerializer(freelancer, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
-            return Response(serializer.data)
-        return Response(serializer.errors, status=400)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 
-class ReviewViewSet(viewsets.ModelViewSet):
     serializer_class = ReviewSerializer
-    
+    authentication_classes = [ClerkAuthentication]
+
+    def get_permissions(self):
+        # Allow anyone to view reviews
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+
+        # Only authenticated users can create reviews
+        if self.action in ["create", "perform_create", "mark_helpful", "add_reply"]:
+            return [IsAuthenticated()]
+
+        return [AllowAny()]
+
     def get_queryset(self):
         freelancer_id = self.kwargs.get('freelancer_id')
         return Review.objects.filter(freelancer_id=freelancer_id).order_by('-created_at')
-    
-    # def create(self, request, *args, **kwargs):
-    #     freelancer_id = self.kwargs.get("freelancer_id")
-    #     freelancer = get_object_or_404(Freelancer, id=freelancer_id)
-    #     print("Creating review...")
-    #     client = request.user
 
-    #     # Compute initials
-    #     name_parts = client.username.split()
-    #     initials = "".join(part[0].upper() for part in name_parts)[:2]
-
-    #     data = {
-    #         "freelancer": freelancer.id,
-    #         "client": client.id,
-    #         "client_name": client.username,
-    #         "client_avatar": initials,
-    #         "rating": request.data.get("rating"),
-    #         "content": request.data.get("content"),
-    #     }
-
-    #     serializer = self.get_serializer(data=data)
-    #     serializer.is_valid(raise_exception=True)
-    #     serializer.save()
-
-    #     return Response(serializer.data, status=201)
     def perform_create(self, serializer):
-        print("Creating review...")  # DEBUG
-        user = self.request.user
-        freelancer_id = self.kwargs.get('freelancer_id')
+        print("Request data:", self.request.data)
 
-        client_name = user.full_name or user.username
+        user = self.request.user
+        if not user.is_authenticated:
+            raise PermissionDenied("Authentication required")
+
+        freelancer_id = self.kwargs.get('freelancer_id')
+        freelancer = get_object_or_404(Freelancer, id=freelancer_id)
+
+        # Compute client name & avatar
+        client_name = f"{user.first_name} {user.last_name}".strip() or user.username
         client_avatar = "".join([part[0].upper() for part in client_name.split()[:2]])
 
         serializer.save(
-            freelancer_id=freelancer_id,
+            freelancer=freelancer,
             client=user,
             client_name=client_name,
             client_avatar=client_avatar,
@@ -174,22 +167,135 @@ class ReviewViewSet(viewsets.ModelViewSet):
         review.helpful_count += 1
         review.save()
         return Response({'helpful_count': review.helpful_count})
-    
-    @action(detail=True, methods=['post'])
-    def add_reply(self, request, pk=None, *args, **kwargs):
-        review = self.get_object()
 
+    @action(detail=True, methods=['post'])
+    def add_reply(self, request, pk=None):
+        review = self.get_object()
         serializer = ReviewReplySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        serializer.save(review=review)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+class ReviewViewSet(viewsets.ModelViewSet):
+    serializer_class = ReviewSerializer
+    authentication_classes = [ClerkAuthentication]
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        freelancer_id = (
+            self.kwargs.get("freelancer_pk")
+            or self.kwargs.get("freelancer_id")
+        )
+
+        if freelancer_id:
+            return Review.objects.filter(
+                freelancer_id=freelancer_id
+            ).order_by("-created_at")
+
+        return Review.objects.all()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        freelancer_id = (
+            self.kwargs.get("freelancer_pk")
+            or self.kwargs.get("freelancer_id")
+        )
+
+        freelancer = get_object_or_404(Freelancer, id=freelancer_id)
+
+        client_name = (
+            f"{user.first_name} {user.last_name}".strip()
+            or user.username
+        )
+        client_avatar = "".join(
+            part[0].upper() for part in client_name.split()[:2]
+        )
+
+        serializer.save(
+            freelancer=freelancer,
+            client=user,
+            client_name=client_name,
+            client_avatar=client_avatar,
+            helpful_count=0,
+        )
+
+    @action(detail=True, methods=["post"])
+    def add_reply(self, request, pk=None):
+        review = self.get_object()
+        serializer = ReviewReplySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         serializer.save(review=review)
         return Response(serializer.data, status=201)
-    
-  
+
+    @action(detail=True, methods=["post"])
+    def mark_helpful(self, request, pk=None):
+        review = self.get_object()
+        user = request.user
+
+        helpful, created = ReviewHelpful.objects.get_or_create(
+            review=review,
+            user=user
+        )
+
+        if not created:
+            return Response(
+                {"detail": "You already marked this review as helpful."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        review.helpful_count += 1
+        review.save(update_fields=["helpful_count"])
+
+        return Response(
+            {"helpful_count": review.helpful_count},
+            status=status.HTTP_200_OK
+        )
+
 class TestimonialViewSet(viewsets.ModelViewSet):
-    queryset = Testimonial.objects.all()
     serializer_class = TestimonialSerializer
+
+    def get_queryset(self):
+        # Public users only see approved testimonials
+        if self.request.user.is_staff:
+            return Testimonial.objects.all().order_by("-created_at")
+        return Testimonial.objects.filter(is_approved=True).order_by("-created_at")
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+        elif self.action == "create":
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
+    
+    def perform_create(self, serializer):
+        user = self.request.user
+
+        name = f"{user.first_name} {user.last_name}".strip() or user.username
+        avatar = "".join(part[0].upper() for part in name.split()[:2])
+
+        serializer.save(
+            name=name,
+            avatar=avatar,
+            is_approved=False  # always require moderation
+        )
+
 
 class JobViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Job.objects.all()
     serializer_class = JobSerializer
+
+@api_view(["GET"])
+@authentication_classes([ClerkAuthentication])
+@permission_classes([IsAuthenticated])
+def whoami(request):
+    user = request.user
+    return Response({
+        "id": user.id,
+        "email": user.email,
+        "name": user.first_name,
+        "clerk_id": user.username
+    })

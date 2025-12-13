@@ -3,6 +3,7 @@ from django.db import models
 from django.contrib.auth.models import User   
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.html  import mark_safe
+from django.conf import settings
 
 
 # Create your models here.
@@ -137,7 +138,7 @@ class Review(models.Model):
     def __str__(self):
         return self.freelancer.name + " - " + str(self.rating)
 class ReviewReply(models.Model):
-    review = models.OneToOneField('Review', on_delete=models.CASCADE, related_name='reply')
+    review = models.ForeignKey(Review, on_delete=models.CASCADE, related_name="replies")
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -180,4 +181,18 @@ class Testimonial(models.Model):
     def __str__(self):
         return self.name
 
- 
+class ReviewHelpful(models.Model):
+    review = models.ForeignKey(
+        Review,
+        on_delete=models.CASCADE,
+        related_name="helpful_votes"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("review", "user")
+

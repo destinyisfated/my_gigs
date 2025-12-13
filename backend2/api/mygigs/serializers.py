@@ -21,10 +21,49 @@ class ProfessionSerializer(serializers.ModelSerializer):
             return request.build_absolute_uri(obj.image.url)
         return None
 
+# class FreelancerSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Freelancer
+#         fields = "__all__"
+
+from rest_framework import serializers
+from django.contrib.auth.models import User
+from .models import Freelancer, Profession
+from users.models import ClerkProfile
+
 class FreelancerSerializer(serializers.ModelSerializer):
+    # Nested fields for User
+    user_email = serializers.EmailField(source="user.email", required=False)
+    user_first_name = serializers.CharField(source="user.first_name", required=False)
+    user_last_name = serializers.CharField(source="user.last_name", required=False)
+    avatar_url = serializers.URLField(source="user.clerk_profile.profile_image", required=False)
+
     class Meta:
         model = Freelancer
-        fields = "__all__"
+        fields ="__all__"
+            
+        read_only_fields = ["rating", "review_count", "completed_jobs", "created_at", "updated_at"]
+
+    def update(self, instance, validated_data):
+        # 1️⃣ Update nested User fields
+        user_data = validated_data.pop("user", {})
+        if instance.user:
+            for attr, value in user_data.items():
+                if attr == "clerk_profile" and value.get("profile_image"):
+                    # Update ClerkProfile image if provided
+                    clerk_profile, _ = ClerkProfile.objects.get_or_create(user=instance.user)
+                    clerk_profile.profile_image = value["profile_image"]
+                    clerk_profile.save()
+                else:
+                    setattr(instance.user, attr, value)
+            instance.user.save()
+
+        # 2️⃣ Update Freelancer fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
+
 
 class FreelancerListSerializer(serializers.ModelSerializer):
     """Serializer for listing freelancers (lightweight)"""
@@ -66,11 +105,22 @@ class ReviewReplySerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ("id", "review", "created_at")
 class ReviewSerializer(serializers.ModelSerializer):
-    reply = ReviewReplySerializer(read_only=True)
-    
+    replies = ReviewReplySerializer(many=True, read_only=True)
+    content = serializers.CharField(required=True, allow_blank=False)
     class Meta:
         model = Review
-        fields = '__all__'
+        fields = [
+            "id",
+            "freelancer",
+            "client",
+            "client_name",
+            "client_avatar",
+            "rating",
+            "content",
+            "helpful_count",
+            "created_at",
+            "replies"
+        ]
         read_only_fields = (
             "id",
             "freelancer",
@@ -79,6 +129,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             "client_avatar",
             "helpful_count",
             "created_at",
+            "replies",
         )
 
 class JobSerializer(serializers.ModelSerializer):
@@ -95,3 +146,4 @@ class TestimonialSerializer(serializers.ModelSerializer):
     class Meta:
         model = Testimonial
         fields = '__all__'
+        read_only_fields = ("is_approved", "created_at")

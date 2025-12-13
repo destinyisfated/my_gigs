@@ -8,46 +8,92 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@clerk/clerk-react";
 
 // API
 import {
   fetchReviewsByFreelancer,
   createReview,
-  // markReviewHelpful,
-  // addReviewReply
+  markReviewHelpful,
+  addReviewReply
 } from "@/lib/api";
 
-// Map Django response → Frontend Review type
+
+// -------------------
+// FIXED MAPPING LOGIC
+// -------------------
+// function mapBackendReview(review: any): Review {
+//   const authorName = review.client_name || "Client";
+
+//   return {
+//     id: review.id.toString(),
+//     author: authorName,
+//     authorInitials: authorName
+//       .split(" ")
+//       .map((n: string) => n[0])
+//       .join("")
+//       .toUpperCase(),
+
+//     role: "Client",
+//     rating: review.rating,
+//     content: review.content,
+//     date: new Date(review.created_at).toLocaleDateString(),
+//     helpful: review.helpful_count,
+//     verified: true,
+
+//     // FIX: Backend uses "replies" → ALWAYS an array
+//     replies: Array.isArray(review.replies)
+//       ? review.replies.map((reply: any) => {
+//           const rAuthor = reply.author_name || "Freelancer";
+
+//           return {
+//             id: reply.id.toString(),
+//             author: rAuthor,
+//             authorInitials: rAuthor
+//               .split(" ")
+//               .map((n: string) => n[0])
+//               .join("")
+//               .toUpperCase(),
+//             date: new Date(reply.created_at).toLocaleDateString(),
+//             content: reply.content,
+//           };
+//         })
+//       : [],
+//   };
+// }
 function mapBackendReview(review: any): Review {
   return {
     id: review.id.toString(),
     author: review.client_name,
     authorInitials: review.client_avatar,
-    role: "Client", // you can change this later if needed
+    role: "Client",
     rating: review.rating,
     content: review.content,
     date: new Date(review.created_at).toLocaleDateString(),
     helpful: review.helpful_count,
     verified: true,
-    replies: review.reply
-      ? [
-          {
-            id: `reply-${review.id}`,
-            author: review.client_name,
-            authorInitials: review.client_avatar,
-            date: new Date(review.created_at).toLocaleDateString(),
-            content: review.reply,
-          },
-        ]
-      : [],
+
+    replies: review.replies.map((rep: any) => ({
+      id: rep.id.toString(),
+      author: "Freelancer",
+      authorInitials: "F",
+      content: rep.content,
+      date: new Date(rep.created_at).toLocaleDateString(),
+    })),
   };
 }
 
+
 const FreelancerReviews = () => {
   const { id } = useParams();
+  const { getToken } = useAuth();
+
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // ---------------------
+  // LOAD REVIEWS PROPERLY
+  // ---------------------
   useEffect(() => {
     if (!id) return;
 
@@ -57,10 +103,14 @@ const FreelancerReviews = () => {
 
         const response = await fetchReviewsByFreelancer(parseInt(id));
 
-        // Your backend returns a paginated format
+        console.log("Backend raw response:", response);
+
         const mapped = response.results.map(mapBackendReview);
 
+        console.log("Normalized array:", mapped);
+
         setReviews(mapped);
+
       } catch (error) {
         console.error(error);
         toast({
@@ -76,80 +126,141 @@ const FreelancerReviews = () => {
     loadData();
   }, [id]);
 
-  const totalReviews = reviews.length;
-  const averageRating =
-    totalReviews > 0
-      ? reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
-      : 0;
 
-  const ratingDistribution = reviews.reduce(
-    (acc, r) => {
-      acc[r.rating]++;
-      return acc;
-    },
-    { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
-  );
 
-  // POST new review
+  // ---------------------
+  // SUBMIT NEW REVIEW
+  // ---------------------
   const handleSubmitReview = async (rating: number, content: string) => {
     if (!id) return;
 
+    const trimmed = content.trim();
+    if (trimmed.length < 20) {
+      toast({
+        title: "Error",
+        description: "Review must be at least 20 characters.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
+      const token = await getToken({ template: "default" });
+
       const created = await createReview(parseInt(id), {
         rating,
-        content,
-      });
+        content: trimmed,
+      }, token);
 
-      // Map backend → frontend format
-      const newReview = mapBackendReview(created);
-
-      setReviews([newReview, ...reviews]);
+      const mapped = mapBackendReview(created);
+      setReviews([mapped, ...reviews]);
 
       toast({
         title: "Review submitted",
         description: "Thank you for your feedback!",
       });
-    } catch (error) {
-      console.error(error);
+
+    } catch (error: any) {
+      console.error("Review error:", error);
       toast({
-        title: "Error",
-        description: "Failed to submit review.",
+        title: "Error submitting review",
+        description: error.message || "Unknown error",
         variant: "destructive",
       });
     }
   };
 
-  // Future backend integration (when endpoints exist)
-  const handleHelpful = async (reviewId: string) => {
-    setReviews(
-      reviews.map((r) =>
-        r.id === reviewId ? { ...r, helpful: r.helpful + 1 } : r
+
+  // ---------------------
+  // HELPFUL CLICK
+  // ---------------------
+
+// const handleHelpful = async (reviewId: string) => {
+//   try {
+//     const token = await getToken({ template: "default" });
+//     const updated = await markReviewHelpful(parseInt(reviewId), token);
+
+//     setReviews((prev) =>
+//       prev.map((r) =>
+//         r.id === reviewId ? { ...r, helpful: updated.helpful_count } : r
+//       )
+//     );
+//   } catch (error) {
+//     toast({
+//       title: "Error",
+//       description: "Failed to mark helpful",
+//       variant: "destructive",
+//     });
+//   }
+// };
+
+const handleHelpful = async (reviewId: string) => {
+  try {
+    const token = await getToken({ template: "default" });
+    const data = await markReviewHelpful(Number(reviewId), token);
+
+    setReviews((prev) =>
+      prev.map((r) =>
+        r.id === reviewId
+          ? { ...r, helpful: data.helpful_count }
+          : r
       )
     );
-  };
+  } catch (error:any) {
+    toast({
+      title: "Notice",
+      description: error.message,
+      variant: "default",
+    });
+  }
+};
 
-  const handleReply = async (reviewId: string, content: string) => {
-    setReviews(
-      reviews.map((r) =>
+
+
+
+  // ---------------------
+  // REPLY TO REVIEW
+  // ---------------------
+ 
+const handleReply = async (reviewId: string, content: string) => {
+  try {
+    const token = await getToken({ template: "default" });
+    const reply = await addReviewReply(Number(reviewId), content, token);
+
+    setReviews((prev) =>
+      prev.map((r) =>
         r.id === reviewId
           ? {
               ...r,
               replies: [
-                ...r.replies,
+                ...(r.replies || []),
                 {
-                  id: Date.now().toString(),
+                  id: reply.id.toString(),
                   author: "You",
                   authorInitials: "Y",
-                  date: "Just now",
-                  content,
+                  date: new Date(reply.created_at).toLocaleDateString(),
+                  content: reply.content,
                 },
               ],
             }
           : r
       )
     );
-  };
+  } catch (err) {
+    console.error(err);
+    toast({
+      title: "Error",
+      description: "Failed to add reply",
+      variant: "destructive",
+    });
+  }
+};
 
+
+
+  // ---------------------
+  // RENDER
+  // ---------------------
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
@@ -171,16 +282,30 @@ const FreelancerReviews = () => {
           </div>
 
           <div className="grid lg:grid-cols-3 gap-8">
+            {/* LEFT SIDE - STATS + FORM */}
             <div className="lg:col-span-1 space-y-6">
               <ReviewStats
-                totalReviews={totalReviews}
-                averageRating={averageRating}
-                ratingDistribution={ratingDistribution}
+                totalReviews={reviews.length}
+                averageRating={
+                  reviews.length > 0
+                    ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+                    : 0
+                }
+                ratingDistribution={
+                  reviews.reduce(
+                    (acc, r) => {
+                      acc[r.rating]++;
+                      return acc;
+                    },
+                    { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
+                  )
+                }
               />
 
               <ReviewForm onSubmit={handleSubmitReview} />
             </div>
 
+            {/* RIGHT SIDE - REVIEWS LIST */}
             <div className="lg:col-span-2 space-y-4">
               <h2 className="text-2xl font-bold mb-4">
                 All Reviews ({reviews.length})
@@ -190,10 +315,12 @@ const FreelancerReviews = () => {
                 <div className="py-10 text-center text-gray-500">
                   Loading reviews...
                 </div>
+
               ) : reviews.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   No reviews yet. Be the first to review!
                 </div>
+
               ) : (
                 reviews.map((review) => (
                   <ReviewCard

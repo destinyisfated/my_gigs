@@ -141,4 +141,5 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-CLERK_DOMAIN = "YOUR-CLERK-DOMAIN-HERE"
+CLERK_DOMAIN = "wired-ferret-99.clerk.accounts.dev"
+

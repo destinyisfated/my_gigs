@@ -375,44 +375,147 @@ export async function fetchReviewsByFreelancer(freelancerId: number): Promise<Re
   return apiFetch<Review[]>(`/freelancers/${freelancerId}/reviews/`);
 }
 
-export async function createReview(
-  freelancerId: number,
-  data: { rating: number; content: string }
-): Promise<Review> {
-  // Django endpoint: POST /api/freelancers/{freelancer_id}/reviews/
-  return apiFetch<Review>(`/freelancers/${freelancerId}/reviews/`, {
-    method: 'POST',
+// export async function createReview(
+//   freelancerId: number,
+//   data: { rating: number; content: string }
+// ): Promise<Review> {
+//   // Django endpoint: POST /api/freelancers/{freelancer_id}/reviews/
+//   return apiFetch<Review>(`/freelancers/${freelancerId}/reviews/`, {
+//     method: 'POST',
+//     body: JSON.stringify(data),
+//   });
+// }
+export async function createReview(freelancerId: number, data: any, token?: string) {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/freelancers/${freelancerId}/reviews/`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     body: JSON.stringify(data),
   });
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => null);
+    console.error("BACKEND ERROR:", errBody);
+    throw new Error(errBody?.detail || "Failed to create review");
+  }
+
+  return res.json();
 }
 
-export async function markReviewHelpful(freelancerId: number, reviewId: string): Promise<{ helpful_count: number }> {
-  // Django endpoint: POST /api/freelancers/{freelancer_id}/reviews/{review_id}/mark_helpful/
-  return apiFetch<{ helpful_count: number }>(
-    `/freelancers/${freelancerId}/reviews/${reviewId}/mark_helpful/`,
-    { method: 'POST' }
-  );
-}
+// export async function markReviewHelpful(freelancerId: number, reviewId: string): Promise<{ helpful_count: number }> {
+//   // Django endpoint: POST /api/freelancers/{freelancer_id}/reviews/{review_id}/mark_helpful/
+//   return apiFetch<{ helpful_count: number }>(
+//     `/freelancers/${freelancerId}/reviews/${reviewId}/mark_helpful/`,
+//     { method: 'POST' }
+//   );
+// }
 
-export async function addReviewReply(
-  freelancerId: number,
-  reviewId: string,
-  content: string
-): Promise<{ content: string; created_at: string }> {
-  // Django endpoint: POST /api/freelancers/{freelancer_id}/reviews/{review_id}/add_reply/
-  return apiFetch<{ content: string; created_at: string }>(
-    `/freelancers/${freelancerId}/reviews/${reviewId}/add_reply/`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ content }),
-    }
-  );
-}
+// export async function addReviewReply(
+//   freelancerId: number,
+//   reviewId: string,
+//   content: string
+// ): Promise<{ content: string; created_at: string }> {
+//   // Django endpoint: POST /api/freelancers/{freelancer_id}/reviews/{review_id}/add_reply/
+//   return apiFetch<{ content: string; created_at: string }>(
+//     `/freelancers/${freelancerId}/reviews/${reviewId}/add_reply/`,
+//     {
+//       method: 'POST',
+//       body: JSON.stringify({ content }),
+//     }
+//   );
+// }
 
 // --------------------------------------------
 // Jobs API
 // --------------------------------------------
 // Django Model: Job
+
+// export async function addReviewReply(reviewId: string, content: string, token?: string) {
+//   const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/reviews/${reviewId}/add_reply/`, {
+//     method: "POST",
+//     headers: {
+//       "Content-Type": "application/json",
+//       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+//     },
+//     body: JSON.stringify({ content }),
+//   });
+
+//   if (!res.ok) {
+//     const errBody = await res.json().catch(() => null);
+//     throw new Error(errBody?.detail || "Failed to add reply");
+//   }
+
+//   return res.json();
+// }
+
+// export async function markReviewHelpful(reviewId: string, token?: string) {
+//   const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/reviews/${reviewId}/mark_helpful/`, {
+//     method: "POST",
+//     headers: {
+//       "Content-Type": "application/json",
+//       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+//     },
+//   });
+
+//   if (!res.ok) {
+//     const errBody = await res.json().catch(() => null);
+//     throw new Error(errBody?.detail || "Failed to mark helpful");
+//   }
+
+//   return res.json();
+// }
+
+// MARK REVIEW HELPFUL
+export async function markReviewHelpful(reviewId: number, token?: string) {
+  const res = await fetch(
+    `${import.meta.env.VITE_API_BASE_URL}/reviews/${reviewId}/mark_helpful/`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    }
+  );
+  const data = await res.json();
+
+  if (!res.ok) {
+      throw new Error(data.detail || "Already marked as helpful");
+
+  }
+
+  return data;
+}
+
+// ADD REVIEW REPLY
+export async function addReviewReply(
+  reviewId: number,
+  content: string,
+  token?: string
+) {
+  const res = await fetch(
+    `${import.meta.env.VITE_API_BASE_URL}/reviews/${reviewId}/add_reply/`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ content }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => null);
+    throw new Error(err?.detail || "Failed to add reply");
+  }
+
+  return res.json();
+}
+
+
 
 export interface Job {
   id: number;
@@ -523,22 +626,31 @@ export interface Testimonial {
  *     serializer_class = TestimonialSerializer
  */
 
-export async function fetchTestimonials(): Promise<Testimonial[]> {
-  // Django endpoint: /api/testimonials/
-  return apiFetch<Testimonial[]>('/testimonials/');
+export async function fetchTestimonials() {
+  const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/testimonial/`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch testimonials");
+  }
+  return res.json();
 }
 
-export async function createTestimonial(data: {
+
+const handleSubmitTestimonial = async (testimonialData: {
   name: string;
   content: string;
   rating: number;
-}): Promise<Testimonial> {
-  // Django endpoint: POST /api/testimonials/
-  return apiFetch<Testimonial>('/testimonials/', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-}
+  avatar: string;
+}) => {
+  try {
+    const saved = await createTestimonial(testimonialData);
+    setTestimonials((prev) => [...prev, saved]); // add to local state
+  } catch (error: any) {
+    console.error(error);
+    alert("Failed to submit testimonial: " + error.message);
+  }
+};
+
+
 
 // --------------------------------------------
 // Location API (Kenya Counties, Constituencies, Wards)
